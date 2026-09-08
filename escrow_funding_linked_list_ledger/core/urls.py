@@ -34,8 +34,13 @@ urlpatterns = [
         name="contribute",
     ),
     path(
-        "projects/<int:project_id>/vote/",
-        views.cast_vote,
-        name="cast_vote",
+        "projects/<int:project_id>/stages/<int:stage_number>/progress/",
+        views.submit_progress_update,
+        name="submit_progress_update",
+    ),
+    path(
+        "projects/<int:project_id>/updates/<int:update_id>/vote/",
+        views.vote_on_progress_update,
+        name="vote_on_progress_update",
     ),
 ]

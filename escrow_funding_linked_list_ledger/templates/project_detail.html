@@ -4,7 +4,7 @@
 <div class="card shadow-sm mb-4">
     <div class="card-body p-4">
         <span
-            class="badge text-bg-{% if project.status == 'ACTIVE' %}primary{% elif project.status == 'RELEASED' %}success{% else %}secondary{% endif %} float-end"
+            class="badge text-bg-{% if project.status == 'ACTIVE' %}primary{% elif project.status == 'COMPLETED' %}success{% else %}secondary{% endif %} float-end"
         >
             {{ project.get_status_display }}
         </span>
@@ -22,16 +22,16 @@
             </div>
 
             <div class="col-md-4">
-                <div class="small text-muted">Target Amount</div>
-                <div class="fs-3 fw-bold">
-                    ${{ project.target_amount }}
+                <div class="small text-muted">Total Released</div>
+                <div class="fs-3 fw-bold text-success">
+                    ${{ project.total_released_amount }}
                 </div>
             </div>
 
             <div class="col-md-4">
-                <div class="small text-muted">Created By</div>
-                <div class="fs-5">
-                    {{ project.creator.username }}
+                <div class="small text-muted">Target Amount</div>
+                <div class="fs-3 fw-bold">
+                    ${{ project.target_amount }}
                 </div>
             </div>
         </div>
@@ -51,101 +51,177 @@
 </div>
 
 {% if user.is_authenticated and project.status == "ACTIVE" %}
-    <div class="row g-4 mb-5">
-        <div class="col-lg-6">
-            <div class="card shadow-sm h-100">
-                <div class="card-body p-4">
-                    <h2 class="h4">Fund This Campaign</h2>
+    <div class="card shadow-sm mb-4">
+        <div class="card-body p-4">
+            <h2 class="h4">Fund This Campaign</h2>
 
-                    <form
-                        method="post"
-                        action="{% url 'contribute' project.id %}"
-                    >
-                        {% csrf_token %}
+            <form method="post" action="{% url 'contribute' project.id %}">
+                {% csrf_token %}
 
-                        <div class="mb-3">
-                            <label
-                                class="form-label"
-                                for="{{ contribution_form.amount.id_for_label }}"
-                            >
-                                Contribution Amount
-                            </label>
+                <div class="row align-items-end">
+                    <div class="col-md-4">
+                        <label
+                            class="form-label"
+                            for="{{ contribution_form.amount.id_for_label }}"
+                        >
+                            Contribution Amount
+                        </label>
 
-                            {{ contribution_form.amount }}
+                        {{ contribution_form.amount }}
+                    </div>
 
-                            {% for error in contribution_form.amount.errors %}
-                                <div class="text-danger small mt-1">
-                                    {{ error }}
-                                </div>
-                            {% endfor %}
-                        </div>
-
+                    <div class="col-md-4">
                         <button class="btn btn-primary" type="submit">
                             Deposit to Escrow
                         </button>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        {% if is_backer %}
-            <div class="col-lg-6">
-                <div class="card shadow-sm h-100">
-                    <div class="card-body p-4">
-                        <h2 class="h4">Milestone Governance Vote</h2>
-
-                        {% if has_voted %}
-                            <p class="text-muted small">
-                                You may change your vote while the campaign is active.
-                            </p>
-                        {% else %}
-                            <p class="text-muted small">
-                                Backers decide whether escrow is released or refunded.
-                            </p>
-                        {% endif %}
-
-                        <form
-                            method="post"
-                            action="{% url 'cast_vote' project.id %}"
-                        >
-                            {% csrf_token %}
-
-                            {% for radio in vote_form.choice %}
-                                <div class="form-check mb-2">
-                                    {{ radio.tag }}
-
-                                    <label
-                                        class="form-check-label"
-                                        for="{{ radio.id_for_label }}"
-                                    >
-                                        {{ radio.choice_label }}
-                                    </label>
-                                </div>
-                            {% endfor %}
-
-                            <button class="btn btn-success mt-2" type="submit">
-                                Submit Vote
-                            </button>
-                        </form>
                     </div>
                 </div>
-            </div>
-        {% endif %}
+            </form>
+        </div>
     </div>
 {% endif %}
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <div>
-        <h2 class="h3 mb-1">Linked-List Ledger</h2>
-        <p class="text-muted mb-0">
-            Every block points to the hash of the block before it.
-        </p>
-    </div>
+<h2 class="h3 mb-3">Four Funding Stages</h2>
 
-    <a class="btn btn-outline-secondary" href="{% url 'home' %}">
-        All Campaigns
-    </a>
+<div class="row g-4 mb-5">
+    {% for entry in stage_entries %}
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <strong>
+                            Stage {{ entry.stage.stage_number }}:
+                            {{ entry.stage.title }}
+                        </strong>
+
+                        <span
+                            class="badge text-bg-{% if entry.stage.status == 'RELEASED' %}success{% elif entry.stage.status == 'VOTING' %}warning{% elif entry.stage.status == 'READY' %}primary{% else %}secondary{% endif %}"
+                        >
+                            {{ entry.stage.get_status_display }}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="card-body">
+                    <p>{{ entry.stage.description }}</p>
+
+                    <div class="row">
+                        <div class="col-6">
+                            <div class="small text-muted">Allocated</div>
+                            <div class="fw-bold">
+                                ${{ entry.stage.allocated_amount }}
+                            </div>
+                        </div>
+
+                        <div class="col-6">
+                            <div class="small text-muted">Released</div>
+                            <div class="fw-bold text-success">
+                                ${{ entry.stage.released_amount }}
+                            </div>
+                        </div>
+                    </div>
+
+                    {% if entry.pending_update %}
+                        <hr>
+
+                        <h3 class="h6">Fundraiser Progress Update</h3>
+
+                        <p class="small">
+                            {{ entry.pending_update.description }}
+                        </p>
+
+                        {% if entry.pending_update.evidence_url %}
+                            <a
+                                href="{{ entry.pending_update.evidence_url }}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="small"
+                            >
+                                View Evidence
+                            </a>
+                        {% endif %}
+
+                        {% if is_backer and active_update.id == entry.pending_update.id %}
+                            <hr>
+
+                            <form
+                                method="post"
+                                action="{% url 'vote_on_progress_update' project.id entry.pending_update.id %}"
+                            >
+                                {% csrf_token %}
+
+                                {% for radio in progress_vote_form.choice %}
+                                    <div class="form-check mb-2">
+                                        {{ radio.tag }}
+
+                                        <label
+                                            class="form-check-label"
+                                            for="{{ radio.id_for_label }}"
+                                        >
+                                            {{ radio.choice_label }}
+                                        </label>
+                                    </div>
+                                {% endfor %}
+
+                                <button
+                                    class="btn btn-success btn-sm mt-2"
+                                    type="submit"
+                                >
+                                    {% if has_voted %}
+                                        Update My Vote
+                                    {% else %}
+                                        Submit Vote
+                                    {% endif %}
+                                </button>
+                            </form>
+                        {% endif %}
+                    {% endif %}
+
+                    {% if is_creator and entry.stage.status == "READY" and project.status == "ACTIVE" %}
+                        <hr>
+
+                        <h3 class="h6">Publish Progress Update</h3>
+
+                        <form
+                            method="post"
+                            action="{% url 'submit_progress_update' project.id entry.stage.stage_number %}"
+                        >
+                            {% csrf_token %}
+
+                            <div class="mb-3">
+                                <label
+                                    class="form-label"
+                                    for="{{ progress_update_form.description.id_for_label }}"
+                                >
+                                    Progress Update
+                                </label>
+
+                                {{ progress_update_form.description }}
+                            </div>
+
+                            <div class="mb-3">
+                                <label
+                                    class="form-label"
+                                    for="{{ progress_update_form.evidence_url.id_for_label }}"
+                                >
+                                    Evidence Link
+                                </label>
+
+                                {{ progress_update_form.evidence_url }}
+                            </div>
+
+                            <button class="btn btn-primary btn-sm" type="submit">
+                                Submit for Backer Vote
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    {% endfor %}
 </div>
+
+<h2 class="h3 mb-3">Linked-List Ledger</h2>
 
 {% for block in blocks %}
     <div class="card shadow-sm mb-3 border-start border-4 border-primary">
@@ -159,25 +235,30 @@
 
         <div class="card-body">
             <div class="row g-3">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <div class="small text-muted">Sender</div>
-                    <div>
-                        {{ block.sender.username|default:"System" }}
-                    </div>
+                    <div>{{ block.sender.username|default:"System" }}</div>
                 </div>
 
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <div class="small text-muted">Amount</div>
-                    <div class="fw-bold">
-                        ${{ block.amount }}
+                    <div class="fw-bold">${{ block.amount }}</div>
+                </div>
+
+                <div class="col-md-3">
+                    <div class="small text-muted">Funding Stage</div>
+                    <div>
+                        {% if block.stage %}
+                            Stage {{ block.stage.stage_number }}
+                        {% else %}
+                            Not Applicable
+                        {% endif %}
                     </div>
                 </div>
 
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <div class="small text-muted">Created</div>
-                    <div>
-                        {{ block.created_at|date:"Y-m-d H:i:s T" }}
-                    </div>
+                    <div>{{ block.created_at|date:"Y-m-d H:i" }}</div>
                 </div>
             </div>
 
