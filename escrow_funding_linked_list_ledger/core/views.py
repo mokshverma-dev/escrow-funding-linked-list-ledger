@@ -52,6 +52,76 @@ def append_block(
     )
 
 
+def release_first_stage_automatically(project):
+    first_stage = FundingStage.objects.select_for_update().filter(
+        project=project,
+        stage_number=1,
+        status__in=[
+            FundingStage.Status.AWAITING_FUNDING,
+            FundingStage.Status.READY,
+        ],
+    ).first()
+
+    if first_stage is None:
+        return None
+
+    release_amount = (
+        first_stage.allocated_amount
+        - first_stage.released_amount
+    )
+
+    if release_amount <= Decimal("0.00"):
+        return None
+
+    if project.escrow_balance < release_amount:
+        return None
+
+    fundraiser_wallet = Profile.objects.select_for_update().get(
+        user=project.creator
+    )
+
+    fundraiser_wallet.balance += release_amount
+    fundraiser_wallet.save(update_fields=["balance"])
+
+    project.escrow_balance -= release_amount
+    project.total_released_amount += release_amount
+    project.save(
+        update_fields=[
+            "escrow_balance",
+            "total_released_amount",
+        ]
+    )
+
+    first_stage.released_amount += release_amount
+    first_stage.status = FundingStage.Status.RELEASED
+    first_stage.save(
+        update_fields=[
+            "released_amount",
+            "status",
+        ]
+    )
+
+    append_block(
+        project=project,
+        sender=project.creator,
+        amount=release_amount,
+        transaction_type=Block.TransactionType.RELEASE,
+        stage=first_stage,
+    )
+
+    second_stage = FundingStage.objects.select_for_update().filter(
+        project=project,
+        stage_number=2,
+        status=FundingStage.Status.LOCKED,
+    ).first()
+
+    if second_stage is not None:
+        second_stage.status = FundingStage.Status.READY
+        second_stage.save(update_fields=["status"])
+
+    return release_amount
+
+
 def audit_chain(project):
     expected_previous_hash = "0" * 64
     blocks = list(project.blocks.all())
@@ -178,7 +248,7 @@ def create_project(request):
                             f"stage_{stage_number}_amount"
                         ],
                         status=(
-                            FundingStage.Status.READY
+                            FundingStage.Status.AWAITING_FUNDING
                             if stage_number == 1
                             else FundingStage.Status.LOCKED
                         ),
@@ -362,10 +432,22 @@ def contribute(request, project_id):
         transaction_type=Block.TransactionType.FUND,
     )
 
+    automatic_release = release_first_stage_automatically(
+        project
+    )
+
     messages.success(
         request,
         "Contribution deposited and recorded in the ledger.",
     )
+
+    if automatic_release is not None:
+        messages.success(
+            request,
+            f"Stage 1 was automatically funded and "
+            f"${automatic_release} was released to the fundraiser. "
+            "Stage 2 is now ready for progress updates and voting.",
+        )
 
     return redirect(
         "project_detail",
@@ -408,6 +490,18 @@ def submit_progress_update(request, project_id, stage_number):
         messages.error(
             request,
             "This campaign has already been resolved.",
+        )
+
+        return redirect(
+            "project_detail",
+            project_id=project.id,
+        )
+
+    if stage.stage_number == 1:
+        messages.error(
+            request,
+            "Stage 1 is automatically released when funded. "
+            "It does not use progress voting.",
         )
 
         return redirect(
@@ -586,6 +680,17 @@ def vote_on_progress_update(request, project_id, update_id):
         messages.error(
             request,
             "This campaign has already been resolved.",
+        )
+
+        return redirect(
+            "project_detail",
+            project_id=project.id,
+        )
+
+    if stage.stage_number == 1:
+        messages.error(
+            request,
+            "Stage 1 is automatically released and cannot be voted on.",
         )
 
         return redirect(

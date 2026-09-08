@@ -70,6 +70,7 @@ class Project(models.Model):
 
 class FundingStage(models.Model):
     class Status(models.TextChoices):
+        AWAITING_FUNDING = "AWAITING", "Awaiting Stage 1 Funding"
         LOCKED = "LOCKED", "Locked"
         READY = "READY", "Ready for Progress Update"
         VOTING = "VOTING", "Voting in Progress"
