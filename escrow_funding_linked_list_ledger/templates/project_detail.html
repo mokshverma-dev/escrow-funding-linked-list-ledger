@@ -118,6 +118,12 @@
                             <div class="fw-bold">
                                 ${{ entry.stage.allocated_amount }}
                             </div>
+                            {% if entry.stage.rejection_count > 0 %}
+                                <div class="alert alert-warning small mt-3 mb-0">
+                                    Rejected progress updates:
+                                    {{ entry.stage.rejection_count }} of 3.
+                                </div>
+                            {% endif %}
                         </div>
 
                         <div class="col-6">

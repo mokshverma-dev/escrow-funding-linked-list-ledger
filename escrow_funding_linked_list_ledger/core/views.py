@@ -1,5 +1,5 @@
-from decimal import Decimal, ROUND_DOWN
 import hmac
+from decimal import Decimal, ROUND_DOWN
 
 from django.contrib import messages
 from django.contrib.auth import login
@@ -34,6 +34,11 @@ def append_block(
     progress_update=None,
 ):
     last_block = project.blocks.order_by("-block_number").first()
+
+    if last_block is None:
+        raise ValueError(
+            "A ledger block cannot be created before the Genesis Block."
+        )
 
     return Block.objects.create(
         project=project,
@@ -216,7 +221,6 @@ def project_detail(request, project_id):
     )
 
     stages = project.stages.all()
-
     stage_entries = []
 
     for stage in stages:
@@ -231,10 +235,6 @@ def project_detail(request, project_id):
             }
         )
 
-    is_backer = False
-    is_creator = False
-    existing_vote = None
-
     current_stage = project.stages.filter(
         status__in=[
             FundingStage.Status.READY,
@@ -248,6 +248,10 @@ def project_detail(request, project_id):
         active_update = current_stage.progress_updates.filter(
             status=ProgressUpdate.Status.PENDING
         ).first()
+
+    is_backer = False
+    is_creator = False
+    existing_vote = None
 
     if request.user.is_authenticated:
         is_creator = request.user == project.creator
@@ -270,6 +274,7 @@ def project_detail(request, project_id):
             "blocks": project.blocks.select_related(
                 "sender",
                 "stage",
+                "progress_update",
             ).all(),
             "stage_entries": stage_entries,
             "audit": audit_chain(project),
@@ -277,7 +282,7 @@ def project_detail(request, project_id):
             "progress_update_form": ProgressUpdateForm(),
             "progress_vote_form": ProgressVoteForm(
                 initial={
-                    "choice": existing_vote.choice
+                    "choice": existing_vote.choice,
                 }
             ) if existing_vote else ProgressVoteForm(),
             "is_backer": is_backer,
@@ -421,6 +426,17 @@ def submit_progress_update(request, project_id, stage_number):
             project_id=project.id,
         )
 
+    if stage.rejection_count >= 3:
+        messages.error(
+            request,
+            "This funding stage has reached its maximum rejection limit.",
+        )
+
+        return redirect(
+            "project_detail",
+            project_id=project.id,
+        )
+
     if project.escrow_balance < stage.allocated_amount:
         messages.error(
             request,
@@ -467,6 +483,81 @@ def submit_progress_update(request, project_id, stage_number):
     )
 
 
+def refund_remaining_escrow(project, stage, progress_update):
+    contributions = list(
+        project.blocks.filter(
+            transaction_type=Block.TransactionType.FUND,
+        )
+        .values("sender_id")
+        .annotate(total_amount=Sum("amount"))
+        .order_by("sender_id")
+    )
+
+    remaining_escrow = project.escrow_balance
+
+    total_contributed = sum(
+        (
+            contribution["total_amount"]
+            for contribution in contributions
+        ),
+        Decimal("0.00"),
+    )
+
+    if remaining_escrow <= Decimal("0.00"):
+        project.status = Project.Status.REFUNDED
+        project.save(update_fields=["status"])
+        return
+
+    if total_contributed <= Decimal("0.00"):
+        raise ValueError(
+            "Escrow cannot be refunded because there are no contributions."
+        )
+
+    refunded_total = Decimal("0.00")
+
+    for index, contribution in enumerate(contributions):
+        is_last_contributor = index == len(contributions) - 1
+
+        if is_last_contributor:
+            refund_amount = remaining_escrow - refunded_total
+        else:
+            refund_amount = (
+                remaining_escrow
+                * contribution["total_amount"]
+                / total_contributed
+            ).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_DOWN,
+            )
+
+        contributor_wallet = Profile.objects.select_for_update().get(
+            user_id=contribution["sender_id"]
+        )
+
+        contributor_wallet.balance += refund_amount
+        contributor_wallet.save(update_fields=["balance"])
+
+        append_block(
+            project=project,
+            sender=contributor_wallet.user,
+            amount=refund_amount,
+            transaction_type=Block.TransactionType.REFUND,
+            stage=stage,
+            progress_update=progress_update,
+        )
+
+        refunded_total += refund_amount
+
+    project.escrow_balance = Decimal("0.00")
+    project.status = Project.Status.REFUNDED
+    project.save(
+        update_fields=[
+            "escrow_balance",
+            "status",
+        ]
+    )
+
+
 @login_required
 @transaction.atomic
 def vote_on_progress_update(request, project_id, update_id):
@@ -495,6 +586,17 @@ def vote_on_progress_update(request, project_id, update_id):
         messages.error(
             request,
             "This campaign has already been resolved.",
+        )
+
+        return redirect(
+            "project_detail",
+            project_id=project.id,
+        )
+
+    if stage.status != FundingStage.Status.VOTING:
+        messages.error(
+            request,
+            "This funding stage is not currently open for voting.",
         )
 
         return redirect(
@@ -637,14 +739,46 @@ def vote_on_progress_update(request, project_id, update_id):
         progress_update.status = ProgressUpdate.Status.REJECTED
         progress_update.save(update_fields=["status"])
 
-        stage.status = FundingStage.Status.READY
-        stage.save(update_fields=["status"])
+        stage.rejection_count += 1
 
-        messages.success(
-            request,
-            "The progress update was rejected. "
-            "The fundraiser may submit a revised update.",
-        )
+        if stage.rejection_count >= 3:
+            stage.status = FundingStage.Status.FAILED
+            stage.save(
+                update_fields=[
+                    "rejection_count",
+                    "status",
+                ]
+            )
+
+            refund_remaining_escrow(
+                project=project,
+                stage=stage,
+                progress_update=progress_update,
+            )
+
+            messages.success(
+                request,
+                "This progress stage was rejected three times. "
+                "All remaining escrow funds were refunded "
+                "proportionally to fund providers.",
+            )
+        else:
+            stage.status = FundingStage.Status.READY
+            stage.save(
+                update_fields=[
+                    "rejection_count",
+                    "status",
+                ]
+            )
+
+            remaining_retries = 3 - stage.rejection_count
+
+            messages.success(
+                request,
+                "The progress update was rejected. "
+                f"The fundraiser has {remaining_retries} "
+                "progress-update attempt(s) remaining.",
+            )
 
     else:
         messages.success(

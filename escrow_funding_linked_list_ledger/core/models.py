@@ -74,6 +74,7 @@ class FundingStage(models.Model):
         READY = "READY", "Ready for Progress Update"
         VOTING = "VOTING", "Voting in Progress"
         RELEASED = "RELEASED", "Released"
+        FAILED = "FAILED", "Failed and Refunded"
 
     project = models.ForeignKey(
         Project,
@@ -91,6 +92,9 @@ class FundingStage(models.Model):
         max_digits=14,
         decimal_places=2,
         default=Decimal("0.00"),
+    )
+    rejection_count = models.PositiveSmallIntegerField(
+    default=0,
     )
     status = models.CharField(
         max_length=10,
@@ -198,8 +202,8 @@ class Block(models.Model):
     previous_hash = models.CharField(max_length=64)
     current_hash = models.CharField(max_length=64, editable=False)
     created_at = models.DateTimeField(
-        default=timezone.now,
-        editable=False,
+    default=timezone.now,
+    editable=False,
     )
 
     class Meta:
@@ -257,7 +261,7 @@ class Block(models.Model):
                     )
 
         super().save(*args, **kwargs)
-
+        
     def __str__(self):
         return f"{self.project.title} — Block #{self.block_number}"
 
