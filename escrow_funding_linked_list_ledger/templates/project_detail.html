@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card shadow-sm mb-4">
+    <div class="card-body p-4">
+        <span
+            class="badge text-bg-{% if project.status == 'ACTIVE' %}primary{% elif project.status == 'RELEASED' %}success{% else %}secondary{% endif %} float-end"
+        >
+            {{ project.get_status_display }}
+        </span>
+
+        <h1 class="h2 pe-5">{{ project.title }}</h1>
+
+        <p class="text-muted">{{ project.description }}</p>
+
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="small text-muted">Escrow Balance</div>
+                <div class="fs-3 fw-bold text-primary">
+                    ${{ project.escrow_balance }}
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="small text-muted">Target Amount</div>
+                <div class="fs-3 fw-bold">
+                    ${{ project.target_amount }}
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="small text-muted">Created By</div>
+                <div class="fs-5">
+                    {{ project.creator.username }}
+                </div>
+            </div>
+        </div>
+
+        <hr>
+
+        {% if verified %}
+            <span class="badge text-bg-success p-2">
+                Chain Verified (Tamper-Free)
+            </span>
+        {% else %}
+            <span class="badge text-bg-danger p-2">
+                Tampered Ledger Detected!
+            </span>
+        {% endif %}
+    </div>
+</div>
+
+{% if user.is_authenticated and project.status == "ACTIVE" %}
+    <div class="row g-4 mb-5">
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body p-4">
+                    <h2 class="h4">Fund This Campaign</h2>
+
+                    <form
+                        method="post"
+                        action="{% url 'contribute' project.id %}"
+                    >
+                        {% csrf_token %}
+
+                        <div class="mb-3">
+                            <label
+                                class="form-label"
+                                for="{{ contribution_form.amount.id_for_label }}"
+                            >
+                                Contribution Amount
+                            </label>
+
+                            {{ contribution_form.amount }}
+
+                            {% for error in contribution_form.amount.errors %}
+                                <div class="text-danger small mt-1">
+                                    {{ error }}
+                                </div>
+                            {% endfor %}
+                        </div>
+
+                        <button class="btn btn-primary" type="submit">
+                            Deposit to Escrow
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        {% if is_backer %}
+            <div class="col-lg-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-body p-4">
+                        <h2 class="h4">Milestone Governance Vote</h2>
+
+                        {% if has_voted %}
+                            <p class="text-muted small">
+                                You may change your vote while the campaign is active.
+                            </p>
+                        {% else %}
+                            <p class="text-muted small">
+                                Backers decide whether escrow is released or refunded.
+                            </p>
+                        {% endif %}
+
+                        <form
+                            method="post"
+                            action="{% url 'cast_vote' project.id %}"
+                        >
+                            {% csrf_token %}
+
+                            {% for radio in vote_form.choice %}
+                                <div class="form-check mb-2">
+                                    {{ radio.tag }}
+
+                                    <label
+                                        class="form-check-label"
+                                        for="{{ radio.id_for_label }}"
+                                    >
+                                        {{ radio.choice_label }}
+                                    </label>
+                                </div>
+                            {% endfor %}
+
+                            <button class="btn btn-success mt-2" type="submit">
+                                Submit Vote
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+{% endif %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="h3 mb-1">Linked-List Ledger</h2>
+        <p class="text-muted mb-0">
+            Every block points to the hash of the block before it.
+        </p>
+    </div>
+
+    <a class="btn btn-outline-secondary" href="{% url 'home' %}">
+        All Campaigns
+    </a>
+</div>
+
+{% for block in blocks %}
+    <div class="card shadow-sm mb-3 border-start border-4 border-primary">
+        <div class="card-header bg-white d-flex justify-content-between">
+            <strong>Block #{{ block.block_number }}</strong>
+
+            <span class="badge text-bg-dark">
+                {{ block.get_transaction_type_display }}
+            </span>
+        </div>
+
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="small text-muted">Sender</div>
+                    <div>
+                        {{ block.sender.username|default:"System" }}
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="small text-muted">Amount</div>
+                    <div class="fw-bold">
+                        ${{ block.amount }}
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="small text-muted">Created</div>
+                    <div>
+                        {{ block.created_at|date:"Y-m-d H:i:s T" }}
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+
+            <div class="mb-2">
+                <div class="small text-muted">Previous Hash</div>
+                <code class="small text-break">
+                    {{ block.previous_hash }}
+                </code>
+            </div>
+
+            <div>
+                <div class="small text-muted">Current Hash</div>
+                <code class="small text-break">
+                    {{ block.current_hash }}
+                </code>
+            </div>
+        </div>
+    </div>
+{% endfor %}
+{% endblock %}

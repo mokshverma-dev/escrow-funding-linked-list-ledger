@@ -100,6 +100,16 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.app.github.dev",
+    "https://*.github.dev",
+    "http://127.0.0.1",
+    "http://localhost",
+    "https://127.0.0.1:8000",
+    "https://localhost:8000",
+]
+
+
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
