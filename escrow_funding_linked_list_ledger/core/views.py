@@ -8,7 +8,7 @@ from django.db.models import Sum
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import ContributionForm, ProjectForm, RegistrationForm, VoteForm
-from .models import Block, Profile, Project, Vote
+from .models import Block, FundingStage, Profile, Project, Vote
 
 
 def append_block(project, sender, amount, transaction_type):
@@ -91,9 +91,32 @@ def create_project(request):
 
         if form.is_valid():
             with transaction.atomic():
-                project = form.save(commit=False)
-                project.creator = request.user
-                project.save()
+                project = Project.objects.create(
+                    creator=request.user,
+                    title=form.cleaned_data["title"],
+                    description=form.cleaned_data["description"],
+                    target_amount=form.cleaned_data["target_amount"],
+                )
+
+                for stage_number in range(1, 5):
+                    FundingStage.objects.create(
+                        project=project,
+                        stage_number=stage_number,
+                        title=form.cleaned_data[
+                            f"stage_{stage_number}_title"
+                        ],
+                        description=form.cleaned_data[
+                            f"stage_{stage_number}_description"
+                        ],
+                        allocated_amount=form.cleaned_data[
+                            f"stage_{stage_number}_amount"
+                        ],
+                        status=(
+                            FundingStage.Status.READY
+                            if stage_number == 1
+                            else FundingStage.Status.LOCKED
+                        ),
+                    )
 
                 Block.objects.create(
                     project=project,
@@ -106,7 +129,7 @@ def create_project(request):
 
             messages.success(
                 request,
-                "Campaign created and Genesis Block added.",
+                "Campaign, Genesis Block, and four funding stages created.",
             )
 
             return redirect(
