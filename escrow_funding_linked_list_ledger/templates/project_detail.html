@@ -38,15 +38,22 @@
 
         <hr>
 
-        {% if verified %}
-            <span class="badge text-bg-success p-2">
-                Chain Verified (Tamper-Free)
-            </span>
-        {% else %}
-            <span class="badge text-bg-danger p-2">
-                Tampered Ledger Detected!
-            </span>
+        {% if audit.valid %}
+    <div class="alert alert-success mb-0">
+        <strong>Chain Verified (Tamper-Free)</strong><br>
+        {{ audit.reason }}
+    </div>
+{% else %}
+    <div class="alert alert-danger mb-0">
+        <strong>Tampered Ledger Detected!</strong><br>
+
+        {% if audit.block_number is not None %}
+            Failed at Block #{{ audit.block_number }}.<br>
         {% endif %}
+
+        <span>{{ audit.reason }}</span>
+    </div>
+{% endif %}
     </div>
 </div>
 

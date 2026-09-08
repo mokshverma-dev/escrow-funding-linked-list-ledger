@@ -1,4 +1,5 @@
 from decimal import Decimal, ROUND_DOWN
+import hmac
 
 from django.contrib import messages
 from django.contrib.auth import login
@@ -46,26 +47,64 @@ def append_block(
     )
 
 
-def is_chain_valid(project):
+def audit_chain(project):
     expected_previous_hash = "0" * 64
     blocks = list(project.blocks.all())
 
     if not blocks:
-        return False
+        return {
+            "valid": False,
+            "block_number": None,
+            "reason": "No Genesis Block exists for this campaign.",
+        }
 
     for expected_number, block in enumerate(blocks):
         if block.block_number != expected_number:
-            return False
+            return {
+                "valid": False,
+                "block_number": block.block_number,
+                "reason": (
+                    "Block numbering is not sequential. "
+                    f"Expected Block #{expected_number}."
+                ),
+            }
 
-        if block.previous_hash != expected_previous_hash:
-            return False
+        if not hmac.compare_digest(
+            block.previous_hash,
+            expected_previous_hash,
+        ):
+            return {
+                "valid": False,
+                "block_number": block.block_number,
+                "reason": (
+                    "The previous hash does not match the "
+                    "current hash of the preceding block."
+                ),
+            }
 
-        if block.current_hash != block.compute_hash():
-            return False
+        calculated_hash = block.compute_hash()
+
+        if not hmac.compare_digest(
+            block.current_hash,
+            calculated_hash,
+        ):
+            return {
+                "valid": False,
+                "block_number": block.block_number,
+                "reason": (
+                    "The stored hash differs from the calculated hash. "
+                    "A protected block value, hash algorithm, or timestamp "
+                    "has changed after block creation."
+                ),
+            }
 
         expected_previous_hash = block.current_hash
 
-    return True
+    return {
+        "valid": True,
+        "block_number": None,
+        "reason": "Every block hash and linked-list reference is valid.",
+    }
 
 
 def home(request):
@@ -233,7 +272,7 @@ def project_detail(request, project_id):
                 "stage",
             ).all(),
             "stage_entries": stage_entries,
-            "verified": is_chain_valid(project),
+            "audit": audit_chain(project),
             "contribution_form": ContributionForm(),
             "progress_update_form": ProgressUpdateForm(),
             "progress_vote_form": ProgressVoteForm(

@@ -1,3 +1,6 @@
+import hmac
+from django.core.exceptions import ValidationError
+
 import hashlib
 from decimal import Decimal
 
@@ -194,7 +197,10 @@ class Block(models.Model):
     )
     previous_hash = models.CharField(max_length=64)
     current_hash = models.CharField(max_length=64, editable=False)
-    created_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        editable=False,
+    )
 
     class Meta:
         ordering = ["block_number"]
@@ -219,7 +225,37 @@ class Block(models.Model):
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     def save(self, *args, **kwargs):
-        self.current_hash = self.compute_hash()
+        if self._state.adding:
+            if self.created_at is None:
+                self.created_at = timezone.now()
+
+            self.current_hash = self.compute_hash()
+
+        else:
+            original = Block.objects.get(pk=self.pk)
+
+            protected_fields = [
+                "project_id",
+                "stage_id",
+                "progress_update_id",
+                "block_number",
+                "sender_id",
+                "amount",
+                "transaction_type",
+                "previous_hash",
+                "current_hash",
+                "created_at",
+            ]
+
+            for field_name in protected_fields:
+                if getattr(self, field_name) != getattr(
+                    original,
+                    field_name,
+                ):
+                    raise ValidationError(
+                        "Ledger blocks are immutable and cannot be edited."
+                    )
+
         super().save(*args, **kwargs)
 
     def __str__(self):
