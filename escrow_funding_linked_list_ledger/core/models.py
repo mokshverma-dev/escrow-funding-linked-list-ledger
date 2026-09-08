@@ -27,7 +27,7 @@ class Profile(models.Model):
 class Project(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "ACTIVE", "Active"
-        RELEASED = "RELEASED", "Released"
+        COMPLETED = "COMPLETED", "Completed"
         REFUNDED = "REFUNDED", "Refunded"
 
     creator = models.ForeignKey(
@@ -46,6 +46,11 @@ class Project(models.Model):
         decimal_places=2,
         default=Decimal("0.00"),
     )
+    total_released_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
     status = models.CharField(
         max_length=10,
         choices=Status.choices,
@@ -60,17 +65,115 @@ class Project(models.Model):
         return self.title
 
 
+class FundingStage(models.Model):
+    class Status(models.TextChoices):
+        LOCKED = "LOCKED", "Locked"
+        READY = "READY", "Ready for Progress Update"
+        VOTING = "VOTING", "Voting in Progress"
+        RELEASED = "RELEASED", "Released"
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="stages",
+    )
+    stage_number = models.PositiveSmallIntegerField()
+    title = models.CharField(max_length=160)
+    description = models.TextField()
+    allocated_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+    )
+    released_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.LOCKED,
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["stage_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "stage_number"],
+                name="unique_project_stage_number",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(stage_number__gte=1)
+                & models.Q(stage_number__lte=4),
+                name="stage_number_between_one_and_four",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.project.title} — Stage {self.stage_number}"
+
+
+class ProgressUpdate(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending Vote"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    stage = models.ForeignKey(
+        FundingStage,
+        on_delete=models.CASCADE,
+        related_name="progress_updates",
+    )
+    submitted_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="progress_updates",
+    )
+    description = models.TextField()
+    evidence_url = models.URLField(blank=True)
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"{self.stage.project.title} — "
+            f"Stage {self.stage.stage_number} update"
+        )
+
+
 class Block(models.Model):
     class TransactionType(models.TextChoices):
         GENESIS = "GENESIS", "Genesis"
         FUND = "FUND", "Funding Deposit"
-        RELEASE = "RELEASE", "Escrow Release"
+        RELEASE = "RELEASE", "Stage Release"
         REFUND = "REFUND", "Backer Refund"
 
     project = models.ForeignKey(
         Project,
         on_delete=models.CASCADE,
         related_name="blocks",
+    )
+    stage = models.ForeignKey(
+        FundingStage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="release_blocks",
+    )
+    progress_update = models.ForeignKey(
+        ProgressUpdate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="release_blocks",
     )
     block_number = models.PositiveIntegerField()
     sender = models.ForeignKey(
@@ -154,7 +257,40 @@ class Vote(models.Model):
 
     def __str__(self):
         return f"{self.voter.username}: {self.choice}"
-    
+
+
+class ProgressVote(models.Model):
+    class Choice(models.TextChoices):
+        GREEN = "GREEN", "Approve"
+        RED = "RED", "Reject"
+
+    progress_update = models.ForeignKey(
+        ProgressUpdate,
+        on_delete=models.CASCADE,
+        related_name="votes",
+    )
+    voter = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="progress_votes",
+    )
+    choice = models.CharField(
+        max_length=5,
+        choices=Choice.choices,
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["progress_update", "voter"],
+                name="one_vote_per_progress_update_user",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.voter.username}: {self.choice}"
+
 
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
